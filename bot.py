@@ -736,50 +736,32 @@ hook_text: a short 4-8 word viral hook sentence for first 3 seconds
 
 
 def _fake_word_timestamps(text: str, duration_sec: float) -> list[dict]:
-    """
-    Create approximate word timestamps when provider does not support word-level Whisper.
-    This keeps caption rendering working even if AICredits rejects timestamp_granularities.
-    """
+    """Create approximate word timestamps when provider does not support word-level Whisper."""
     words = [w for w in str(text or "").split() if w.strip()]
     if not words:
         return []
-
     total = max(float(duration_sec or 1.0), 1.0)
     step = total / max(len(words), 1)
-
     out = []
     for i, word in enumerate(words):
         start = i * step
         end = min(total, start + max(0.20, step * 0.85))
-        out.append({
-            "word": word,
-            "start": start,
-            "end": end,
-        })
-
+        out.append({"word": word, "start": start, "end": end})
     return out
 
 
 def ai_get_word_timestamps(audio_path: str, duration_sec: float) -> dict:
-    """
-    Get transcription with word timestamps.
+    """Get transcription with word timestamps.
 
-    Some OpenAI-compatible providers reject:
-        timestamp_granularities=["word"]
-
-    In that case they may return:
-        Invalid request body
-
-    So this function:
-    1. Tries true word-level timestamps.
-    2. If that fails, tries normal verbose_json transcription.
-    3. If that fails, tries plain text transcription.
-    4. If all fail, returns empty text/words so render can continue.
+    Some OpenAI-compatible providers reject `timestamp_granularities=["word"]`
+    and return errors like "Invalid request body". In that case we fall back
+    to plain transcription and generate approximate word timings so rendering
+    still works.
     """
     timeout = max(60, int(duration_sec * 2))
     model = os.environ.get("WHISPER_MODEL", "whisper-1")
 
-    # Try 1: True word-level timestamps
+    # Best path: true word-level timestamps
     try:
         with open(audio_path, "rb") as f:
             resp = ai_client.audio.transcriptions.create(
@@ -789,20 +771,16 @@ def ai_get_word_timestamps(audio_path: str, duration_sec: float) -> dict:
                 timestamp_granularities=["word"],
                 timeout=timeout,
             )
-
         data = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
-
         if data.get("words"):
             return data
-
         text = data.get("text", "")
         data["words"] = _fake_word_timestamps(text, duration_sec)
         return data
-
     except Exception as e:
         logger.warning("Whisper word timestamps failed, falling back: %s", e)
 
-    # Try 2: verbose_json without word timestamp option
+    # Fallback 1: verbose_json without word timestamp options
     try:
         with open(audio_path, "rb") as f:
             resp = ai_client.audio.transcriptions.create(
@@ -811,16 +789,14 @@ def ai_get_word_timestamps(audio_path: str, duration_sec: float) -> dict:
                 response_format="verbose_json",
                 timeout=timeout,
             )
-
         data = resp.model_dump() if hasattr(resp, "model_dump") else dict(resp)
         text = data.get("text", "")
         data["words"] = data.get("words") or _fake_word_timestamps(text, duration_sec)
         return data
-
     except Exception as e:
         logger.warning("Whisper verbose_json fallback failed: %s", e)
 
-    # Try 3: plain text transcription
+    # Fallback 2: plain text/json transcription
     try:
         with open(audio_path, "rb") as f:
             resp = ai_client.audio.transcriptions.create(
@@ -829,21 +805,13 @@ def ai_get_word_timestamps(audio_path: str, duration_sec: float) -> dict:
                 response_format="text",
                 timeout=timeout,
             )
-
         text = str(resp)
-        return {
-            "text": text,
-            "words": _fake_word_timestamps(text, duration_sec),
-        }
-
+        return {"text": text, "words": _fake_word_timestamps(text, duration_sec)}
     except Exception as e:
         logger.warning("Whisper text fallback failed: %s", e)
 
-    # Last fallback: no captions, but do not fail full render
-    return {
-        "text": "",
-        "words": [],
-        }
+    # Last resort: continue render without captions instead of failing whole job
+    return {"text": "", "words": []}
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # VIDEO COMPOSITION
@@ -1063,7 +1031,15 @@ def render_video(
         silence_duration = ffprobe_duration(silence_path)
 
         logger.info("[%s] Running Whisper", job_id)
-        whisper_data = ai_get_word_timestamps(audio_path, silence_duration)
+        # Use actual extracted audio duration, not only video duration.
+        # Some files have audio a few milliseconds shorter than video; without this
+        # MoviePy can later try reading beyond the audio file and fail.
+        try:
+            audio_duration = ffprobe_duration(audio_path)
+        except Exception:
+            audio_duration = silence_duration
+        transcription_duration = min(silence_duration, audio_duration)
+        whisper_data = ai_get_word_timestamps(audio_path, transcription_duration)
         full_text = whisper_data.get("text", "")
         whisper_words = whisper_data.get("words", []) or []
 
@@ -1124,8 +1100,38 @@ def render_video(
         clips_to_close.append(composite)
 
         logger.info("[%s] Assembling audio", job_id)
-        speech_audio = AudioFileClip(audio_path).with_duration(composite.duration)
+        speech_audio_src = AudioFileClip(audio_path)
+        clips_to_close.append(speech_audio_src)
+
+        # Do not extend speech audio beyond its real file duration.
+        # MoviePy can throw: "Accessing time t=..., with clip duration=..."
+        # if an AudioFileClip is forced longer than the underlying mp3.
+        audio_real_dur = float(speech_audio_src.duration or 0)
+        video_real_dur = float(composite.duration or audio_real_dur)
+        safe_dur = min(video_real_dur, audio_real_dur)
+        if safe_dur > 0.20:
+            safe_dur -= 0.05  # tiny safety margin for codec rounding
+        safe_dur = max(0.10, safe_dur)
+
+        if safe_dur < video_real_dur:
+            composite = composite.with_duration(safe_dur)
+
+        speech_audio = speech_audio_src.subclipped(0, safe_dur).with_duration(safe_dur)
         clips_to_close.append(speech_audio)
+
+        # Clamp word timings to the final safe duration.
+        clamped_words = []
+        for w in whisper_words:
+            ws = float(w.get("start", 0))
+            we = float(w.get("end", ws))
+            if ws >= safe_dur:
+                continue
+            nw = dict(w)
+            nw["start"] = max(0.0, ws)
+            nw["end"] = min(safe_dur, max(ws + 0.05, we))
+            clamped_words.append(nw)
+        whisper_words = clamped_words
+
         all_audio: list[Any] = [speech_audio] + caption_audio + broll_aud
 
         if chosen_bgm:
