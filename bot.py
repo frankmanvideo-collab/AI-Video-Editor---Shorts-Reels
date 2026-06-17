@@ -169,18 +169,30 @@ async def callback(update:Update, context:ContextTypes.DEFAULT_TYPE):
             return
         req_id=data.split("_",1)[1]
         if data.startswith("manualapprove_"):
-            req=approve_manual_recharge(req_id, uid)
-            if not req:
-                await q.edit_message_text("❌ Request already processed or not submitted.")
+            result, error = approve_manual_recharge_and_credit(req_id, uid)
+
+            if not result:
+                await q.edit_message_text(f"❌ Approval failed: {error}")
                 return
-            newbal=credit_wallet(req["user_id"], req["amount_paisa"], f"manual_recharge:{req_id}")
-            await q.edit_message_text(f"✅ Approved {req_id}\nCredited {rupees_str(req['amount_paisa'])} to user {req['user_id']}.")
+
+            await q.edit_message_text(
+                f"✅ Approved {result['request_id']}\n"
+                f"Credited {rupees_str(result['amount_paisa'])} "
+                f"to user {result['user_id']}.\n"
+                f"New balance: {rupees_str(result['new_balance'])}"
+            )
+
             try:
-                await context.bot.send_message(req["user_id"], f"✅ Recharge approved! Credited {rupees_str(req['amount_paisa'])}. New balance: {rupees_str(newbal)}")
+                await context.bot.send_message(
+                    result["user_id"],
+                    (
+                        f"✅ Recharge approved!\n\n"
+                        f"Credited: {rupees_str(result['amount_paisa'])}\n"
+                        f"New balance: {rupees_str(result['new_balance'])}"
+                    )
+                )
             except Exception:
                 pass
-        else:
-            req=reject_manual_recharge(req_id, uid)
             if not req:
                 await q.edit_message_text("❌ Request already processed or not found.")
                 return
