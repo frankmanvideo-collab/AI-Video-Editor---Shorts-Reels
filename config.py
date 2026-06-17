@@ -39,6 +39,13 @@ MAX_SINGLE_RECHARGE_PAISA = 1_000_000
 MAX_WALLET_BALANCE_PAISA = 5_000_000
 RECHARGE_RATE_LIMIT_PER_HOUR = 5
 
+# Manual UPI fallback recharge (used when UPIGATEWAY_API_KEY is empty)
+MANUAL_UPI_ID = os.environ.get("MANUAL_UPI_ID", "")
+MANUAL_UPI_NAME = os.environ.get("MANUAL_UPI_NAME", "GodMode Bot")
+SUPPORT_EMAIL = os.environ.get("SUPPORT_EMAIL", "support@example.com")
+MANUAL_RECHARGE_EXPIRE_MINUTES = int(os.environ.get("MANUAL_RECHARGE_EXPIRE_MINUTES", "60"))
+MANUAL_RECHARGE_DAILY_LIMIT = int(os.environ.get("MANUAL_RECHARGE_DAILY_LIMIT", "2"))
+
 ALLOWED_VIDEO_MIMES = {
     "video/mp4", "video/quicktime", "video/x-msvideo", "video/webm", "video/x-matroska"
 }
