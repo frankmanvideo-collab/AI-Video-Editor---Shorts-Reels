@@ -260,3 +260,83 @@ def count_manual_approved_today(user_id: int) -> int:
         (user_id,),
     ).fetchone()
     return int(r["c"] if r else 0)
+    def approve_manual_recharge_and_credit(request_id: str, admin_id: int) -> tuple[Optional[dict], str]:
+    """
+    Approve manual recharge and credit wallet atomically.
+    Returns (data, error).
+    """
+    with tx() as c:
+        r = c.execute(
+            "SELECT * FROM manual_recharges WHERE request_id=?",
+            (request_id,)
+        ).fetchone()
+
+        if not r:
+            return None, "Recharge request not found."
+
+        if r["status"] == "APPROVED":
+            return None, "Recharge already approved."
+
+        if r["status"] != "SUBMITTED":
+            return None, f"Recharge is not ready for approval. Current status: {r['status']}"
+
+        user_id = int(r["user_id"])
+        amount = int(r["amount_paisa"])
+
+        user_row = c.execute(
+            "SELECT balance_paisa FROM users WHERE user_id=?",
+            (user_id,)
+        ).fetchone()
+
+        if not user_row:
+            c.execute(
+                "INSERT INTO users(user_id, balance_paisa) VALUES(?, 0)",
+                (user_id,)
+            )
+            current_balance = 0
+        else:
+            current_balance = int(user_row["balance_paisa"])
+
+        new_balance = current_balance + amount
+
+        c.execute(
+            "UPDATE users SET balance_paisa=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+            (new_balance, user_id)
+        )
+
+        c.execute(
+            """
+            INSERT INTO ledger(user_id, event_type, delta_paisa, balance_after, note, job_id)
+            VALUES(?,?,?,?,?,?)
+            """,
+            (
+                user_id,
+                "CREDIT",
+                amount,
+                new_balance,
+                f"manual_recharge:{request_id}",
+                request_id,
+            )
+        )
+
+        c.execute(
+            """
+            UPDATE manual_recharges
+            SET status='APPROVED',
+                approved_at=CURRENT_TIMESTAMP,
+                approved_by=?
+            WHERE request_id=? AND status='SUBMITTED'
+            """,
+            (admin_id, request_id)
+        )
+
+        if c.rowcount == 0:
+            return None, "Recharge was already processed."
+
+        return {
+            "request_id": request_id,
+            "user_id": user_id,
+            "amount_paisa": amount,
+            "new_balance": new_balance,
+        }, ""
+    
