@@ -1,5 +1,4 @@
 from __future__ import annotations
-from db import init_db
 import asyncio, logging, signal, threading, time
 from flask import Flask, jsonify
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
