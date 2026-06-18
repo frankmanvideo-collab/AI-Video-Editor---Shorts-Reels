@@ -118,8 +118,8 @@ def credit_wallet(user_id: int, amount: int, note: str, job_id: Optional[str]=No
 
 def debit_wallet(user_id: int, amount: int, note: str, job_id: Optional[str]=None) -> tuple[bool,int]:
     with tx() as c:
-        c.execute("UPDATE users SET balance_paisa=balance_paisa-?, updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND balance_paisa>=?", (amount,user_id,amount))
-        if c.rowcount == 0:
+        cur = c.execute("UPDATE users SET balance_paisa=balance_paisa-?, updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND balance_paisa>=?", (amount,user_id,amount))
+        if cur.rowcount == 0:
             r = c.execute("SELECT balance_paisa FROM users WHERE user_id=?", (user_id,)).fetchone()
             return False, int(r["balance_paisa"]) if r else 0
         new = int(c.execute("SELECT balance_paisa FROM users WHERE user_id=?", (user_id,)).fetchone()["balance_paisa"])
@@ -153,8 +153,8 @@ def log_order(txn: str, user_id:int, amount:int) -> None:
 
 def confirm_order(txn: str, ref: str) -> Optional[dict]:
     with tx() as c:
-        c.execute("UPDATE order_payments SET status='PAID', gateway_ref=?, processed_at=CURRENT_TIMESTAMP WHERE client_txn_id=? AND status='PENDING' AND processed_at IS NULL", (ref,txn))
-        if c.rowcount == 0: return None
+        cur = c.execute("UPDATE order_payments SET status='PAID', gateway_ref=?, processed_at=CURRENT_TIMESTAMP WHERE client_txn_id=? AND status='PENDING' AND processed_at IS NULL", (ref,txn))
+        if cur.rowcount == 0: return None
         r = c.execute("SELECT user_id,amount_paisa FROM order_payments WHERE client_txn_id=?", (txn,)).fetchone()
         return {"user_id":r["user_id"], "amount_paisa":r["amount_paisa"]}
 
@@ -237,11 +237,11 @@ def approve_manual_recharge(request_id: str, admin_id: int) -> Optional[dict]:
         r = c.execute("SELECT * FROM manual_recharges WHERE request_id=?", (request_id,)).fetchone()
         if not r or r["status"] != "SUBMITTED":
             return None
-        c.execute(
+        cur = c.execute(
             "UPDATE manual_recharges SET status='APPROVED', approved_at=CURRENT_TIMESTAMP, approved_by=? WHERE request_id=? AND status='SUBMITTED'",
             (admin_id, request_id),
         )
-        if c.rowcount == 0:
+        if cur.rowcount == 0:
             return None
         return dict(r)
 
@@ -321,7 +321,7 @@ def approve_manual_recharge_and_credit(request_id: str, admin_id: int) -> tuple[
             )
         )
 
-        c.execute(
+        cur = c.execute(
             """
             UPDATE manual_recharges
             SET status='APPROVED',
@@ -332,7 +332,7 @@ def approve_manual_recharge_and_credit(request_id: str, admin_id: int) -> tuple[
             (admin_id, request_id)
         )
 
-        if c.rowcount == 0:
+        if cur.rowcount == 0:
             return None, "Recharge was already processed."
 
         return {
