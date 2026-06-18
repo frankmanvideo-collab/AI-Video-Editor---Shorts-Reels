@@ -36,16 +36,45 @@ async def enqueue(bot, user_id:int, kind:str, config:dict) -> tuple[bool,str]:
     return True,job_id
 
 def format_report(strategy:dict) -> str:
-    scores=strategy.get("scores",{})
-    lines=[f"📊 *Viral Score:* {strategy.get('viral_score',70)}/100\n"]
-    lines.append(f"🎯 Hook: {scores.get('hook',7)}/10 | Pacing: {scores.get('pacing',7)}/10 | Clarity: {scores.get('clarity',7)}/10 | CTA: {scores.get('cta',6)}/10\n")
-    lines.append("❌ *Top Mistakes:*\n"+"\n".join([f"• {escape_md(x)}" for x in strategy.get("mistakes",[])[:5]])+"\n")
-    lines.append("✅ *Fixes:*\n"+"\n".join([f"• {escape_md(x)}" for x in strategy.get("fixes",[])[:5]])+"\n")
-    lines.append("🧲 *Hook Ideas:*\n"+"\n".join([f"{i+1}\. {escape_md(x)}" for i,x in enumerate(strategy.get("hook_options",[])[:3])])+"\n")
-    lines.append(f"📌 *CTA:* {escape_md((strategy.get('cta_suggestions') or [''])[0])}\n")
-    lines.append(f"📝 *Caption:*\n{escape_md(strategy.get('post_caption',''))}\n")
-    lines.append("🏷 " + escape_md(" ".join(strategy.get("hashtags",[])[:15])))
-    return "\n".join(lines)
+    """Plain-text viral report. No Markdown parse mode to avoid Telegram entity errors."""
+    scores = strategy.get("scores", {}) or {}
+    hooks = strategy.get("hook_options", []) or []
+    mistakes = strategy.get("mistakes", []) or []
+    fixes = strategy.get("fixes", []) or []
+    ctas = strategy.get("cta_suggestions", []) or []
+    hashtags = strategy.get("hashtags", []) or []
+
+    lines = []
+    lines.append(f"📊 Viral Score: {strategy.get('viral_score', 70)}/100")
+    lines.append(
+        f"🎯 Hook: {scores.get('hook', 7)}/10 | "
+        f"Pacing: {scores.get('pacing', 7)}/10 | "
+        f"Clarity: {scores.get('clarity', 7)}/10 | "
+        f"CTA: {scores.get('cta', 6)}/10"
+    )
+    lines.append("")
+    lines.append("❌ Top Mistakes:")
+    for x in mistakes[:5]:
+        lines.append(f"• {x}")
+    lines.append("")
+    lines.append("✅ Fixes:")
+    for x in fixes[:5]:
+        lines.append(f"• {x}")
+    lines.append("")
+    lines.append("🧲 Hook Ideas:")
+    for i, x in enumerate(hooks[:3], 1):
+        lines.append(f"{i}. {x}")
+    lines.append("")
+    if ctas:
+        lines.append(f"📌 CTA: {ctas[0]}")
+    if strategy.get("post_caption"):
+        lines.append("")
+        lines.append("📝 Caption:")
+        lines.append(str(strategy.get("post_caption", "")))
+    if hashtags:
+        lines.append("")
+        lines.append("🏷 " + " ".join(map(str, hashtags[:15])))
+    return "\n".join(lines)[:3900]
 
 async def worker_loop():
     assert video_queue is not None
@@ -75,14 +104,14 @@ async def worker_loop():
             await bot.send_message(user_id,"🧠 Analyzing hook, pacing and content…")
             if is_audit(kind):
                 result=await asyncio.get_running_loop().run_in_executor(None, audit_video, str(input_path), {**config,"kind":kind}, workdir)
-                await bot.send_message(user_id, format_report(result["strategy"]), parse_mode=ParseMode.MARKDOWN_V2)
+                await bot.send_message(user_id, format_report(result["strategy"]))
             else:
                 await bot.send_message(user_id,"🎬 Rendering your viral reel…")
                 result=await asyncio.get_running_loop().run_in_executor(None, render_video_ffmpeg, str(input_path), str(output_path), {**config,"kind":kind}, workdir)
                 await bot.send_message(user_id,"📤 Uploading final video…")
                 with open(output_path,"rb") as vf:
                     await bot.send_video(user_id, vf, caption=f"✅ Done\nDuration: {result['duration']:.1f}s\nCost: {rupees_str(charged) if charged else 'FREE SAMPLE'}", supports_streaming=True)
-                await bot.send_message(user_id, format_report(result["strategy"]), parse_mode=ParseMode.MARKDOWN_V2)
+                await bot.send_message(user_id, format_report(result["strategy"]))
             update_job(job_id,"COMPLETED")
         except Exception as e:
             logger.exception("job failed %s", job_id)
