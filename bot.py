@@ -5,7 +5,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 from config import *
-from db import init_db, get_user, save_session, load_session, clear_session, set_balance, stats, get_latest_waiting_manual, submit_manual_utr, mark_manual_submitted, increment_manual_attempt, fail_manual_recharge, approve_manual_recharge, reject_manual_recharge, credit_wallet
+from db import init_db, get_user, save_session, load_session, clear_session, set_balance, stats, get_latest_waiting_manual, submit_manual_utr, mark_manual_submitted, increment_manual_attempt, fail_manual_recharge, approve_manual_recharge, reject_manual_recharge, credit_wallet, approve_manual_recharge_and_credit
 from keyboards import *
 from jobs import enqueue, worker_loop, video_queue as _vq, service_price, service_max, SERVICE_PRICE
 import jobs
@@ -169,29 +169,23 @@ async def callback(update:Update, context:ContextTypes.DEFAULT_TYPE):
         req_id=data.split("_",1)[1]
         if data.startswith("manualapprove_"):
             result, error = approve_manual_recharge_and_credit(req_id, uid)
-
             if not result:
                 await q.edit_message_text(f"❌ Approval failed: {error}")
                 return
-
             await q.edit_message_text(
                 f"✅ Approved {result['request_id']}\n"
-                f"Credited {rupees_str(result['amount_paisa'])} "
-                f"to user {result['user_id']}.\n"
+                f"Credited {rupees_str(result['amount_paisa'])} to user {result['user_id']}.\n"
                 f"New balance: {rupees_str(result['new_balance'])}"
             )
-
             try:
                 await context.bot.send_message(
                     result["user_id"],
-                    (
-                        f"✅ Recharge approved!\n\n"
-                        f"Credited: {rupees_str(result['amount_paisa'])}\n"
-                        f"New balance: {rupees_str(result['new_balance'])}"
-                    )
+                    f"✅ Recharge approved!\n\nCredited: {rupees_str(result['amount_paisa'])}\nNew balance: {rupees_str(result['new_balance'])}"
                 )
             except Exception:
                 pass
+        else:
+            req=reject_manual_recharge(req_id, uid)
             if not req:
                 await q.edit_message_text("❌ Request already processed or not found.")
                 return
