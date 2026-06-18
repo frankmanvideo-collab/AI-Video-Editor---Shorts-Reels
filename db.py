@@ -260,7 +260,9 @@ def count_manual_approved_today(user_id: int) -> int:
         (user_id,),
     ).fetchone()
     return int(r["c"] if r else 0)
-    def approve_manual_recharge_and_credit(request_id: str, admin_id: int) -> tuple[Optional[dict], str]:
+
+
+def approve_manual_recharge_and_credit(request_id: str, admin_id: int) -> tuple[Optional[dict], str]:
     """
     Approve manual recharge and credit wallet atomically.
     Returns (data, error).
@@ -339,4 +341,3 @@ def count_manual_approved_today(user_id: int) -> int:
             "amount_paisa": amount,
             "new_balance": new_balance,
         }, ""
-    
