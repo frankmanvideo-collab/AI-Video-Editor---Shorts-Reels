@@ -76,6 +76,33 @@ def format_report(strategy:dict) -> str:
         lines.append("🏷 " + " ".join(map(str, hashtags[:15])))
     return "\n".join(lines)[:3900]
 
+def progress_bar(percent: int) -> str:
+    filled = max(0, min(10, int(percent / 10)))
+    return "█" * filled + "░" * (10 - filled)
+
+def estimate_left(kind: str, percent: int) -> str:
+    total = 2 if is_audit(kind) else 6
+    left = max(0, int(round(total * (100 - percent) / 100)))
+    return "Almost done" if left <= 0 else f"~{left} min left"
+
+def progress_text(kind: str, percent: int, status: str, extra: str = "") -> str:
+    title = "📊 Auditing your reel" if is_audit(kind) else "🎬 Editing your reel"
+    text = (
+        f"{title}...\n\n"
+        f"Progress: {progress_bar(percent)} {percent}%\n\n"
+        f"Status:\n{status}\n\n"
+        f"ETA: {estimate_left(kind, percent)}"
+    )
+    if extra:
+        text += f"\n{extra}"
+    return text
+
+async def update_progress(msg, kind: str, percent: int, status: str, extra: str = ""):
+    try:
+        await msg.edit_text(progress_text(kind, percent, status, extra))
+    except Exception:
+        pass
+
 async def worker_loop():
     assert video_queue is not None
     while True:
@@ -85,10 +112,12 @@ async def worker_loop():
         try:
             update_job(job_id,"PROCESSING")
             workdir.mkdir(parents=True,exist_ok=True)
+            progress_msg = await bot.send_message(user_id, progress_text(kind, 0, "📋 Starting now"))
             if not check_disk_space(DOWNLOADS_DIR, 1000): raise RuntimeError("Server storage is low. Try later.")
-            await bot.send_message(user_id,"📥 Downloading your video…")
+            await update_progress(progress_msg, kind, 10, "📥 Downloading your video")
             input_path=workdir/"input.mp4"; output_path=workdir/"output.mp4"
             await download_file(bot, config["video_file_id"], input_path)
+            await update_progress(progress_msg, kind, 20, "🔍 Checking file, duration and limits")
             dur=ffprobe_duration(str(input_path))
             if dur < MIN_VIDEO_DURATION_SEC: raise ValueError(f"Video too short. Minimum {MIN_VIDEO_DURATION_SEC:.0f}s.")
             maxdur=service_max(kind)
