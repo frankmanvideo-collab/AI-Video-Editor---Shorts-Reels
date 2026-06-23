@@ -49,3 +49,15 @@ def recharge_keyboard():
         [InlineKeyboardButton("₹49", callback_data="pay_49"), InlineKeyboardButton("₹99", callback_data="pay_99"), InlineKeyboardButton("₹199", callback_data="pay_199")],
         [InlineKeyboardButton("₹499", callback_data="pay_499"), InlineKeyboardButton("₹999", callback_data="pay_999")]
     ])
+
+
+def main_menu_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("🎯 Get Customers", callback_data="menu_get_customers"), InlineKeyboardButton("🎯 Copy This Edit", callback_data="menu_copy_edit")],
+        [InlineKeyboardButton("🎬 Start Editing", callback_data="menu_start_edit"), InlineKeyboardButton("🔥 Roast My Reel", callback_data="menu_audit")],
+        [InlineKeyboardButton("🎁 Free Sample", callback_data="menu_free_sample"), InlineKeyboardButton("💳 Wallet", callback_data="menu_wallet")],
+        [InlineKeyboardButton("❓ How It Works", callback_data="menu_how"), InlineKeyboardButton("📞 Support", callback_data="menu_support")],
+    ])
+
+def back_main_keyboard():
+    return InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Main Menu", callback_data="menu_main")]])
